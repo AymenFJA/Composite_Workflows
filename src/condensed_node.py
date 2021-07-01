@@ -6,9 +6,9 @@ GROUP  = '_group'
 SUBDAG = '_subdag'
 
 class CondensedNode(DAG):
-
     """
-    Condensed_node by itself represnets a simple DAG that is treated like a node.
+    Condensed Node (CN) by itself represnets a simple and "High Level DAG" (HLDAG) that is treated like a node.
+    And can be expanded during the execution time.
     """
 
     def __init__(self, name, ntype):
@@ -28,16 +28,73 @@ class CondensedNode(DAG):
             self.name = name
             self.values = OrderedDict()
             self.adjacency_table = OrderedDict()
+            
+            self.used_group_ids: Set[Optional[str]] = set() # save group ids here for duplications purposes
         else:
             raise Exception('Condenced node type should be pipe, group or subdag, abort!')
 
     def size(self):
         return(len(self.values))
 
-    def add_pipeline(self,names:list, pipeline: list):
+
+    def add_group(self, group_id, depends_on:None, names:list, group: list):
+        """
+        1- add_groups are used to aggregate scattered nodes (tasks) that are "IDENTICALS" into one or more large component.
+        2- The tasks within the one group are supposed to be executed in parallel and conccurently.
+        3- We shall not allow to add edged between the nodes of the same group.
+        """
+        if self.type != GROUP:
+            raise Exception('Adding a group to a {0} type condenced node is not allowed, abort!'.format(self.type))
+            return
+
+        if len(names) and len(group) == 1:
+            raise Exception('Can not create group with one node, abort!')
+            return
+
+        if not group:
+            raise Exception('No nodes to add, abort!')
+            return
+        
+        if not group_id:
+            raise ValueError("Group_id must not be empty")
+            return
+
+        if group_id in self.used_group_ids:
+            raise Exception(f"group_id '{group_id}' has already been added to the condenced node")
+            return
+        
+        else:
+            internal_values = OrderedDict() # only to store group nodes
+            if len(names) == len(group):
+                for item in range(len(group)):
+                    print("Adding {0}...".format(names[item]))
+
+                    if names[item] in internal_values:
+                        print("Node {0} already exists. Returning.".format(names[item]))
+                        return
+                    # Adding node to the group  
+                    else:
+                        print("Node {0} added. Value is of type {1}.".format(names[item], type(group[item])))
+                        internal_values[names[item]] = group[item]
+
+                # Adding group as a sub-node to the condenced node
+                self.add_sub_node(group_id, internal_values)
+                if depends_on:
+                    self.add_sub_edge(depends_on, group_id)
+
+        # If everyhting went well add the group ID to the IDs
+        self.used_group_ids.add(group_id)
+
+    def get_group(self, group_id):
+
+        if self.type == GROUP:
+            return self.values.get(group_id)
+    
+
+    def add_pipeline(self, names:list, pipeline: list):
 
         if self.type != PIPE:
-            raise Exception('None pipe type is detected, abort!')
+            raise Exception('Adding a pipeline to a {0} type condenced node is not allowed, abort!'.format(self.type))
             return
         
         if len(names) and len(pipeline) == 1:
@@ -45,7 +102,7 @@ class CondensedNode(DAG):
             return
         
         if not pipeline:
-            raise Exception('Pipe has no tasks, abort!')
+            raise Exception('Pipe has no nodes, abort!')
             return
         else:
             if len(names) == len(pipeline):
@@ -61,40 +118,37 @@ class CondensedNode(DAG):
         for key in range(len(keys)-1):
             self.add_sub_edge(keys[key], keys[key+1])
 
-
     def add_sub_node(self, name, obj):
         """
         Add sub_node 'name' to the Condensed_node.
         :param name: String identifier of the node.
         :param obj: An object representing the value of the node.
         """
-        print("Adding %s...", name)
+        print("Adding {0}...".format(name))
 
         if name in self.values:
-            print("Node %s already exists. Returning.",
-                           name)
+            print("Node {0} already exists. Returning.".format(name))
             return
 
         # Add a sub-node to the Condenced node (subdag)
-        if self.type == None or self.type == SUBDAG:
-            print("Node %s added. Value is of type %s.", name, type(obj))
+        if self.type == GROUP or self.type == SUBDAG:
+            print("Node {0} added. Value is of type {1}.".format(name, type(obj)))
             self.values[name] = obj
             self.adjacency_table[name] = []
 
-        # Add a sub-node to the end of a pipeline
+        # Add a sub-node to the end of an alreay existed pipeline
         if self.type == PIPE and len(self.values) != 0:
             src_edge = next(reversed(self.values))
-            print("Node %s added. Value is of type %s.", name, type(obj))
+            print("Node {0} added. Value is of type {1}.".format(name, type(obj)))
             self.values[name] = obj
             self.adjacency_table[name] = []
             self.add_sub_edge(src_edge,name)
         
-        # Add a sub-node to the Condenced node to make a pipeline (from add_pipeline function)
-        else:
+        # Add a sub-node to the Condenced node to build a new pipeline (from add_pipeline function)
+        elif self.type == PIPE:
             print("Node %s added. Value is of type %s.", name, type(obj))
             self.values[name] = obj
             self.adjacency_table[name] = []
-
 
     def add_sub_edge(self, src, dest):
         """
@@ -110,8 +164,8 @@ class CondensedNode(DAG):
             return
 
         # Disallow adding sub-edges to the condensed node before sub-nodes are added.
-        error = "Attempted to create sub-edge ({src}, {dest}), but sub-node {node}" \
-                " does not exist."
+        error = ("Attempted to create sub-edge ({0}, {1}), but sub-node {2}" \
+                " does not exist.".format(src, dest, src))
         if src not in self.adjacency_table:
             error = error.format(src=src, dest=dest, node=src)
             raise ValueError(error)
@@ -121,15 +175,16 @@ class CondensedNode(DAG):
             return
 
         if dest in self.adjacency_table[src]:
-            print("Sub-edge (%s, %s) already in the condensed node. Returning.", src, dest)
+            print("Sub-edge ({0}, {1}) already in the condensed node. Returning.".format(src, dest))
             return
 
         # If dest is not already and edge from src, add it.
         self.adjacency_table[src].append(dest)
-        print("Sub-Edge (%s, %s) added.", src, dest)
+        print("Sub-Edge ({0}, {1}) added.".format(src, dest))
 
-        # Check to make sure we've not created a cycle.
-        if self.detect_cycle():
-            msg = "Adding sub-edge ({}, {}) crates a cycle.".format(src, dest)
-            raise Exception(msg)
+        # If the type of CN not pipeline then check to make sure we've not created a cycle.
+        if self.type != PIPE:
+            if self.detect_cycle():
+                msg = "Adding sub-edge ({0}, {1}) crates a cycle.".format(src, dest)
+                raise Exception(msg)
     
