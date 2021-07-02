@@ -7,7 +7,7 @@ SUBDAG = '_subdag'
 
 class CondensedNode(DAG):
     """
-    Condensed Node (CN) by itself represnets a simple and "High Level DAG" (HLDAG) that is treated like a node.
+    Condensed Node (CN) by itself represents a simple and "High-Level DAG" (HLDAG) that is treated as a node.
     And can be expanded during the execution time.
     """
 
@@ -54,12 +54,12 @@ class CondensedNode(DAG):
 
     def add_group(self, group_id, depends_on:None, names:list, group: list):
         """
-        1- 'add_groups' function is used to aggregate scattered nodes (tasks) that are "IDENTICALS"** into one or more large component.
-        2- The tasks within the one group are supposed to be executed in parallel and conccurently.
-        3- We allow to have dependecies between different groups (group1-->group2), but we shall not allow to add edges between the nodes of the same group. (Why?)
+        1- 'add_groups' function is used to aggregate scattered nodes (tasks) that are "IDENTICALS"** into one or more large components.
+        2- The tasks within one group are supposed to be executed in parallel and concurrently.
+        3- We allow to have dependencies between different groups (group1-->group2), but we shall not allow having dependencies between the nodes of the same group. (Why?)
 
-        ** IDENTICALS: means maybe they are the same tasks with the same parameters or different parameteres
-                       Does that means there are dependecies between them?
+        ** IDENTICALS: means maybe they are the same tasks with the same parameters or different parameters
+                       Does that mean there are dependencies between them?
         """
         if self.type != GROUP:
             raise Exception('Adding a group to a {0} type condenced node is not allowed, abort!'.format(self.type))
