@@ -14,17 +14,29 @@ class CondensedNode(DAG):
     def __init__(self, name, ntype):
         """
         type: pipeline, group or sub-dag.
-              pipeline  : task1 --> task2 --> task3
-                                
-              group     : task1,task2,task3        
-            
-              sub-dag   : This is similar to adding study steps.
+            group     : task1 | task2 | task3
+            sub-dag   : This is similar to a nested DAG.
+            pipeline  : task1 --> task2 --> task3
 
         We hope that the nodetype can tell Maestro
         how to exapnad and execute this node.
+
+        Example: 
+        OrderedDict([('CN',
+                      OrderedDict([('group1', OrderedDict([('A', 1), ('B', 2)])),
+                                   ('group2', OrderedDict([('C', 3), ('D', 4)])),
+                                   ('group3', OrderedDict([('E', 5), ('F', 6)])),
+                                   ('group4', OrderedDict([('G', 5), ('H', 6)]))])),
+                     ('CN2', OrderedDict([('A', 1), ('B', 2), ('C', 3)])),
+                     ('CN3', OrderedDict([('A', 1), ('B', 2)]))])
+
+        where:
+              CN.type = '_group'
+              CN2.type ='_subdag'
+              CN3.type = '_pipe'
         """
         self.type = ntype
-        if self.type == PIPE or self.type == GROUP or self.type == SUBDAG:
+        if self.type in (PIPE, GROUP, SUBDAG):
             self.name = name
             self.values = OrderedDict()
             self.adjacency_table = OrderedDict()
@@ -37,11 +49,17 @@ class CondensedNode(DAG):
         return(len(self.values))
 
 
+    def highlevel(self):
+        pass
+
     def add_group(self, group_id, depends_on:None, names:list, group: list):
         """
-        1- add_groups are used to aggregate scattered nodes (tasks) that are "IDENTICALS" into one or more large component.
+        1- 'add_groups' function is used to aggregate scattered nodes (tasks) that are "IDENTICALS"** into one or more large component.
         2- The tasks within the one group are supposed to be executed in parallel and conccurently.
-        3- We shall not allow to add edged between the nodes of the same group.
+        3- We allow to have dependecies between different groups (group1-->group2), but we shall not allow to add edges between the nodes of the same group. (Why?)
+
+        ** IDENTICALS: means maybe they are the same tasks with the same parameters or different parameteres
+                       Does that means there are dependecies between them?
         """
         if self.type != GROUP:
             raise Exception('Adding a group to a {0} type condenced node is not allowed, abort!'.format(self.type))
@@ -83,13 +101,20 @@ class CondensedNode(DAG):
                     self.add_sub_edge(depends_on, group_id)
 
         # If everyhting went well add the group ID to the IDs
-        self.used_group_ids.add(group_id)
+        if group_id not in self.used_group_ids:
+            self.used_group_ids.add(group_id)
 
     def get_group(self, group_id):
 
         if self.type == GROUP:
-            return self.values.get(group_id)
-    
+            if group_id in self.used_group_ids:
+                return self.values.get(group_id)
+            else:
+                print("{0} does not exist".format(group_id))
+                return
+        else:
+            raise Exception("Can not retrive group from a {0} condecned node".format(self.type))
+            return
 
     def add_pipeline(self, names:list, pipeline: list):
 
