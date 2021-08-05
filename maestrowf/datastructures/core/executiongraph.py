@@ -48,8 +48,12 @@ class _StepRecord:
         workspace.
         """
         self.workspace = Variable("WORKSPACE", workspace)
-        step.run["cmd"] = self.workspace.substitute(step.run["cmd"])
-        step.run["restart"] = self.workspace.substitute(step.run["restart"])
+        if not hasattr(step, 'run'):
+            pass
+        else:
+            step.run["cmd"] = self.workspace.substitute(step.run["cmd"])
+            step.run["restart"] = self.workspace.substitute(step.run["restart"])
+
 
         self.jobid = kwargs.get("jobid", [])
         self.script = kwargs.get("script", "")
@@ -192,7 +196,7 @@ class _StepRecord:
 
     def mark_restart(self):
         """Mark the end time of the record."""
-        LOGGER.debug(
+        LOGGER.info(
             "Marking %s as restarting (TIMEOUT) -- previously %s",
             self.name,
             self.status)
@@ -420,7 +424,7 @@ class ExecutionGraph(DAG, PickleInterface):
         super(ExecutionGraph, self).add_node(name, record)
 
 
-    def expand_condenced_step(self, cn_step):
+    def sort_condenced_step(self, cn_step):
         """
         1- TODO:Traverse inside the CN node via BFS of DFS (depends on the type of the CN)
         2- Do topological sort on the CN sub-nodes
@@ -429,20 +433,41 @@ class ExecutionGraph(DAG, PickleInterface):
         t_sorted = cn_step.topological_sort()
         return t_sorted
 
-
-    def add_condenced_step(self, CN):
+    def add_condenced_step_no_expand(self, CN, WS, params = None):
         """
-        This code consders that the step type is sub-DAG we might need tp
+        Add the condenced step to the Execution graph and do not expand until
+        it reaches the exeution level.
+        """
+
+        data = {
+                    "step":          CN,
+                    "state":         State.INITIALIZED,
+                    "workspace":     WS,
+                    "restart_limit": None,
+                }
+        record = _StepRecord(**data)
+        if params:
+            record.add_params(params)
+
+        self._dependencies[CN.name] = set()
+        super(ExecutionGraph, self).add_node(CN.name, record)
+
+
+    def add_condenced_step_expand(self, CN):
+        """
+        Exapnd the condenced step to the Execution graph.
+
+        This code considers that the step type is a "sub-DAG". We might need to
         consider different types of CN nodes in the future.
 
-        Add a Step(S) Record to the ExecutionGraph.
+        Expand a Condenced_Step and add the CN content to the ExecutionGraph.
 
         :param cn_name: Name of the step to be added.
         :param cn_step: StudyStep instance to be recorded.
 
         # This step is ALWAYS PARAMETERIZED
         # This step has multiple steps in it shaped as a sub-DAG
-        # This step has to be expanded using "expand_condenced_step(self,CN)"
+        # This step has to be sorted using "sort_condenced_step(self,CN)"
  
         for every sub-node in CN unpack the step(dict) and extract these values:
                     workspace: Directory path for the step's working directory.
@@ -451,7 +476,7 @@ class ExecutionGraph(DAG, PickleInterface):
         """
 
         # sort the CN
-        cn_steps_sorted = self.expand_condenced_step(CN)
+        cn_steps_sorted = self.sort_condenced_step(CN)
 
         # Now create entry point of the CN in the _dependencies
         self._dependencies[CN.name] = set()
@@ -514,13 +539,17 @@ class ExecutionGraph(DAG, PickleInterface):
                 self.status_subtree.append(name)
 
             
+            # Now check if we have unpacked condenced edge.
             if unpacked_edges:
                 for src, dest in unpacked_edges:
                     self.add_connection(src, dest)
 
+        # We reverse the the list becasue we are using append (add item at the end of the list) before.
+        # and order is important here so we need the list to be reversed.
+        self.status_subtree.reverse()
+        
         # we must remove the CN after expand it, 
         # otherwise we will have duplicate records.
-        self.status_subtree.reverse()
         self.values.pop(CN.name)
 
     def add_connection(self, parent, step):
@@ -682,7 +711,7 @@ class ExecutionGraph(DAG, PickleInterface):
 
         while retcode != SubmissionCode.OK and \
                 num_restarts < self._submission_attempts:
-            LOGGER.info("Attempting submission of '%s' (attempt %d of %d)...",
+            LOGGER.debug("Attempting submission of '%s' (attempt %d of %d)...",
                         record.name, num_restarts + 1,
                         self._submission_attempts)
 
@@ -951,7 +980,9 @@ class ExecutionGraph(DAG, PickleInterface):
 
         # Now that we've checked the statuses of existing jobs we need to make
         # sure dependencies haven't been met.
-        for key in self.values.keys():
+
+        keys = list(self.values.keys())
+        for key in keys:
             # We MUST dereference from the key. If we use values.items(), a
             # generator gets produced which will give us a COPY of a record and
             # not the actual record.
@@ -964,11 +995,11 @@ class ExecutionGraph(DAG, PickleInterface):
                 continue
             LOGGER.debug("Checking %s -- %s", key, record.jobid)
 
-            # If the record is only INITIALIZED, we have encountered a step
+            # If the record is only INITIALIZED and is not a CN, then we have encountered a step
             # that needs consideration.
-            if record.status == State.INITIALIZED:
+            if not key.startswith('CN-') and record.status == State.INITIALIZED :
                 LOGGER.debug("'%s' found to be initialized. Checking "
-                             "dependencies. ", key)
+                                "dependencies. ", key)
 
                 LOGGER.debug(
                     "Unfulfilled dependencies: %s",
@@ -992,6 +1023,16 @@ class ExecutionGraph(DAG, PickleInterface):
                     else:
                         LOGGER.debug("Already staged. Passing.")
                         continue
+
+            # Make sure if you see a record with these conditions then expand it and add it to the completed step. 
+            if key.startswith('CN-') and record.status == State.INITIALIZED and key not in self.completed_steps:
+                LOGGER.info("'%s' will be expanded and added to the completed set, skipping.", key)
+                self.add_condenced_step_expand(record.step)
+                self.completed_steps.add(key)
+                continue
+
+            # Exit the loop, to trigger the execute_ready_record again!
+            break
 
         # We now have a collection of ready steps. Execute.
         # If we don't have a submission limit, go ahead and submit all.

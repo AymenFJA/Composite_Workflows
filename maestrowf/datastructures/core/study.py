@@ -672,14 +672,17 @@ class Study(DAG, PickleInterface):
                 #####################################################################
                 
                 # 1- Create a CN node and instead of adding the steps to the
-                #    DAG, add them to the CN node of a type "subdag" 
+                #    DAG, add them to the CN node of a type "subdag"
                 CN = CondensedNode("CN-{0}".format(step), ntype = '_subdag')
+
+                # 2- Create the special node (SOURCE_CN-CN.name) that will hold all of 
+                #    the edges entries. 
+                # 3- Create the Workspace entry for the CN
                 CN_SOURCE = SourceNode("SOURCE_{0}".format(CN.name), None)
+                CN_WS     = make_safe_path(self._out_path, CN.name)
 
                 # We must add the Source node to CN and add CN node into the dag
                 CN.add_sub_node(CN_SOURCE.name, CN_SOURCE.connections)
-
-                dag.add_node(CN.name, CN.values)
 
                 for combo in self.parameters:
                     LOGGER.info("\n**********************************\n"
@@ -756,19 +759,14 @@ class Study(DAG, PickleInterface):
                     #    to find a way to compress there parametriz and ship
                     #    them with the step as an obj of that step (node)   
 
-                    # Add to the step to the DAG.
-
+                    # Compress every step's content
                     compressed_obj = {'step'         :step_exp,
                                       'workspace'    :workspace,
                                       'restart_limit':rlimit,
                                       'params'       :combo.get_param_values(self.used_params[step])}
                     
+                    # Add the step expansion to the CN instead of the DAG
                     CN.add_sub_node(step_exp.real_name, compressed_obj)
-                    #dag.add_condenced_step(CN)
-
-                    #dag.add_step(
-                    #    step_exp.real_name, step_exp, workspace, rlimit,
-                    #    params=combo.get_param_values(self.used_params[step]))
 
                     if self.depends[step] or self.hub_depends[step]:
                         # So, because we don't have used parameters, we can
@@ -781,15 +779,10 @@ class Study(DAG, PickleInterface):
                                     combo.get_param_string(self.used_params[p])
                                 )
                             LOGGER.info(
-                                "Adding edge (%s, %s)...", p, combo_str
+                                "Adding edge to the condenced edge(%s, %s)...", p, combo_str
                             )
-                            # 3-Replace every "add_connection" with "add_sub_edge"
-
-
+                            # Add entry for the edge in the condenced edge of the CN-SOURCE"
                             CN_SOURCE.add_to_condenced_edge(p, combo_str)
-
-                            #CN.add_sub_edge(p, combo_str)
-                            #dag.add_connection(p, combo_str)
 
                         # We can still have a case where we have steps that do
                         # funnel into this one even though this particular step
@@ -798,30 +791,26 @@ class Study(DAG, PickleInterface):
                         for parent in self.hub_depends[step]:
                             for item in self.step_combos[parent]:
                                 LOGGER.info(
-                                    "Adding edge (%s, %s)...", item, combo_str
+                                    "Adding edge to the condenced edge(%s, %s)...", item, combo_str
                                 )
-                                # 3-Replace every "add_connection" with "add_sub_edge"
-                                
+
+                                # Add entry for the edge in the condenced edge of the CN-SOURCE"
                                 CN_SOURCE.add_to_condenced_edge(item, combo_str)
-                                #CN.add_sub_edge(item, combo_str)
-                                
-                                
-                                #dag.add_connection(item, combo_str)
                                 
                     else:
                         # Otherwise, just add source since we're not dependent.
                         LOGGER.info(
                             "Adding edge (%s, %s)...", CN_SOURCE.name, combo_str
                         )
-                        
-                        # 3-Replace every "add_connection" with "add_sub_edge"
-                        # NOTE: We added a connection beteween the source and the CN insead of combo_str
-                        # since CN now has the combo_str inside it
+
+                        # Add entry for the edge in the condenced edge of the CN-SOURCE"
                         CN.add_sub_edge(CN_SOURCE.name, combo_str)
 
-                LOGGER.info("Adding condenced step (%s)...", CN.name)
-                dag.add_condenced_step(CN)
+                # Now add the condenced node to the ExecutionGraph but without expanding it.
+                LOGGER.info("Adding condenced step with no expansion(%s)...", CN.name)
+                dag.add_condenced_step_no_expand(CN, CN_WS)
 
+                # Now add an edge between the SOURCE node and the CN
                 LOGGER.info("Adding edge (%s, %s)...", SOURCE, CN.name)
                 dag.add_connection(SOURCE, CN.name)
 
