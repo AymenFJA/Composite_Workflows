@@ -991,17 +991,17 @@ class ExecutionGraph(DAG, PickleInterface):
             # A completed step by definition has had its dependencies met.
             # Skip it.
             if key in self.completed_steps:
-                LOGGER.debug("'%s' in completed set, skipping.", key)
+                LOGGER.info("'%s' in completed set, skipping.", key)
                 continue
-            LOGGER.debug("Checking %s -- %s", key, record.jobid)
+            LOGGER.info("Checking %s -- %s", key, record.jobid)
 
             # If the record is only INITIALIZED and is not a CN, then we have encountered a step
             # that needs consideration.
             if not key.startswith('CN-') and record.status == State.INITIALIZED :
-                LOGGER.debug("'%s' found to be initialized. Checking "
+                LOGGER.info("'%s' found to be initialized. Checking "
                                 "dependencies. ", key)
 
-                LOGGER.debug(
+                LOGGER.info(
                     "Unfulfilled dependencies: %s",
                     self._dependencies[key])
 
@@ -1010,7 +1010,7 @@ class ExecutionGraph(DAG, PickleInterface):
                     self._dependencies[key])
                 self._dependencies[key] = \
                     self._dependencies[key] - set(s_completed)
-                LOGGER.debug(
+                LOGGER.info(
                     "Completed dependencies: %s\n"
                     "Remaining dependencies: %s",
                     s_completed, self._dependencies[key])
@@ -1018,10 +1018,10 @@ class ExecutionGraph(DAG, PickleInterface):
                 # If the gating dependencies set is empty, we can execute.
                 if not self._dependencies[key]:
                     if key not in self.ready_steps:
-                        LOGGER.debug("All dependencies completed. Staging.")
+                        LOGGER.info("All dependencies completed. Staging.")
                         self.ready_steps.append(key)
                     else:
-                        LOGGER.debug("Already staged. Passing.")
+                        LOGGER.info("Already staged. Passing.")
                         continue
 
             # Make sure if you see a record with these conditions then expand it and add it to the completed step. 
@@ -1029,46 +1029,47 @@ class ExecutionGraph(DAG, PickleInterface):
                 LOGGER.info("'%s' will be expanded and added to the completed set, skipping.", key)
                 self.add_condenced_step_expand(record.step)
                 self.completed_steps.add(key)
-                continue
 
-            # Exit the loop, to trigger the execute_ready_record again!
-            break
+        # Check if we have ready steps to be executed if not then return!
+        if not len(self.ready_steps):
+             return self._check_study_completion()
 
         # We now have a collection of ready steps. Execute.
         # If we don't have a submission limit, go ahead and submit all.
-        if self._submission_throttle == 0:
-            LOGGER.info("Launching all ready steps...")
-            _available = len(self.ready_steps)
-        # Else, we have a limit -- adhere to it.
         else:
-            # Compute the number of available slots we have for execution.
-            _available = self._submission_throttle - len(self.in_progress)
-            # Available slots should never be negative, but on the off chance
-            # we are in a slot deficit, then we will just say none are free.
-            _available = max(0, _available)
-            # Now, we need to take the min of the length of the queue and the
-            # computed number of slots. We could have free slots, but have less
-            # in the queue.
-            _available = min(_available, len(self.ready_steps))
-            LOGGER.info("Found %d available slots...", _available)
+            if self._submission_throttle == 0:
+                LOGGER.info("Launching all ready steps... {0}".format(self.ready_steps))
+                _available = len(self.ready_steps)
+            # Else, we have a limit -- adhere to it.
+            else:
+                # Compute the number of available slots we have for execution.
+                _available = self._submission_throttle - len(self.in_progress)
+                # Available slots should never be negative, but on the off chance
+                # we are in a slot deficit, then we will just say none are free.
+                _available = max(0, _available)
+                # Now, we need to take the min of the length of the queue and the
+                # computed number of slots. We could have free slots, but have less
+                # in the queue.
+                _available = min(_available, len(self.ready_steps))
+                LOGGER.info("Found %d available slots...", _available)
 
-        for i in range(0, _available):
-            # Pop the record and execute using the helper method.
-            _record = self.values[self.ready_steps.popleft()]
+            for i in range(0, _available):
+                # Pop the record and execute using the helper method.
+                _record = self.values[self.ready_steps.popleft()]
 
-            # If we get to this point and we've cancelled, cancel the record.
-            if self.is_canceled:
-                LOGGER.info("Cancelling '%s' -- continuing.", _record.name)
-                _record.mark_end(State.CANCELLED)
-                self.cancelled_steps.add(_record.name)
-                continue
+                # If we get to this point and we've cancelled, cancel the record.
+                if self.is_canceled:
+                    LOGGER.info("Cancelling '%s' -- continuing.", _record.name)
+                    _record.mark_end(State.CANCELLED)
+                    self.cancelled_steps.add(_record.name)
+                    continue
 
-            LOGGER.debug("Launching job %d -- %s", i, _record.name)
-            self._execute_record(_record, adapter)
+                LOGGER.info("Launching job %d -- %s", i, _record.name)
+                self._execute_record(_record, adapter)
 
-        # check the status of the study upon finishing this round of execution
-        completion_status = self._check_study_completion()
-        return completion_status
+            # check the status of the study upon finishing this round of execution
+            completion_status = self._check_study_completion()
+            return completion_status
 
     def check_study_status(self):
         """
