@@ -39,6 +39,7 @@ class CondensedNode(DAG):
               CN3.type = '_pipe'
         """
         self.type = ntype
+        self.condensed_edge = []
         if self.type in (PIPE, GROUP, SUBDAG):
             self.name = name
             self.values = OrderedDict()
@@ -46,7 +47,21 @@ class CondensedNode(DAG):
             
             self.used_group_ids: Set[Optional[str]] = set() # save group ids here for duplications purposes
         else:
-            raise Exception('Condenced node type should be pipe, group or subdag, abort!')
+            raise Exception('condensed node type should be pipe, group or subdag, abort!')
+
+    def add_to_condensed_edge(self, src, dest):
+        
+        if dest == src:
+            msg = "Cannot add self referring cycle sub-edge ({}, {})" \
+                  .format(src, dest)
+            raise Exception(msg)
+            return
+        
+        if (src, dest) in self.condensed_edge:
+            LOGGER.info("Sub-edge ({0}, {1}) already in the condensed node. Returning.".format(src, dest))
+            return
+
+        self.condensed_edge.append((src, dest))
 
     def size(self):
         return(len(self.values))
@@ -66,7 +81,7 @@ class CondensedNode(DAG):
                        Does that mean there are dependencies between them?
         """
         if self.type != GROUP:
-            raise Exception('Adding a group to a {0} type condenced node is not allowed, abort!'.format(self.type))
+            raise Exception('Adding a group to a {0} type condensed node is not allowed, abort!'.format(self.type))
             return
 
         if len(names) and len(group) == 1:
@@ -82,7 +97,7 @@ class CondensedNode(DAG):
             return
 
         if group_id in self.used_group_ids:
-            raise Exception(f"group_id '{group_id}' has already been added to the condenced node")
+            raise Exception(f"group_id '{group_id}' has already been added to the condensed node")
             return
         
         else:
@@ -99,7 +114,7 @@ class CondensedNode(DAG):
                         LOGGER.info("Node {0} added. Value is of type {1}.".format(names[item], type(group[item])))
                         internal_values[names[item]] = group[item]
 
-                # Adding group as a sub-node to the condenced node
+                # Adding group as a sub-node to the condensed node
                 self.add_sub_node(group_id, internal_values)
                 if depends_on:
                     self.add_sub_edge(depends_on, group_id)
@@ -123,7 +138,7 @@ class CondensedNode(DAG):
     def add_pipeline(self, names:list, pipeline: list):
 
         if self.type != PIPE:
-            raise Exception('Adding a pipeline to a {0} type condenced node is not allowed, abort!'.format(self.type))
+            raise Exception('Adding a pipeline to a {0} type condensed node is not allowed, abort!'.format(self.type))
             return
         
         if len(names) and len(pipeline) == 1:
@@ -159,7 +174,7 @@ class CondensedNode(DAG):
             LOGGER.info("Node {0} already exists. Returning.".format(name))
             return
 
-        # Add a sub-node to the Condenced node (subdag)
+        # Add a sub-node to the condensed node (subdag)
         if self.type == GROUP or self.type == SUBDAG:
             LOGGER.info("Node {0} added. Value is of type {1}.".format(name, type(obj)))
             self.values[name] = obj
@@ -173,7 +188,7 @@ class CondensedNode(DAG):
             self.adjacency_table[name] = []
             self.add_sub_edge(src_edge,name)
         
-        # Add a sub-node to the Condenced node to build a new pipeline (from add_pipeline function)
+        # Add a sub-node to the condensed node to build a new pipeline (from add_pipeline function)
         elif self.type == PIPE:
             LOGGER.info("Node %s added. Value is of type %s.", name, type(obj))
             self.values[name] = obj
@@ -216,25 +231,3 @@ class CondensedNode(DAG):
             if self.detect_cycle():
                 msg = "Adding sub-edge ({0}, {1}) crates a cycle.".format(src, dest)
                 raise Exception(msg)
-    
-class SourceNode:
-
-    def __init__(self, name, type):
-
-        self.name = name
-        self.type = type
-        self.connections = []
-
-    def add_to_condenced_edge(self, src, dest):
-        
-        if dest == src:
-            msg = "Cannot add self referring cycle sub-edge ({}, {})" \
-                  .format(src, dest)
-            raise Exception(msg)
-            return
-        
-        if (src, dest) in self.connections:
-            LOGGER.info("Sub-edge ({0}, {1}) already in the condensed node. Returning.".format(src, dest))
-            return
-
-        self.connections.append((src, dest))

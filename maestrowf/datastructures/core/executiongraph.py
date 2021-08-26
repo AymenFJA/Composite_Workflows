@@ -420,7 +420,7 @@ class ExecutionGraph(DAG, PickleInterface):
         super(ExecutionGraph, self).add_node(name, record)
 
 
-    def expand_condenced_step(self, cn_step):
+    def expand_condensed_step(self, cn_step):
         """
         1- TODO:Traverse inside the CN node via BFS of DFS (depends on the type of the CN)
         2- Do topological sort on the CN sub-nodes
@@ -430,7 +430,7 @@ class ExecutionGraph(DAG, PickleInterface):
         return t_sorted
 
 
-    def add_condenced_step(self, CN):
+    def add_condensed_step(self, CN):
         """
         This code consders that the step type is sub-DAG we might need tp
         consider different types of CN nodes in the future.
@@ -442,7 +442,7 @@ class ExecutionGraph(DAG, PickleInterface):
 
         # This step is ALWAYS PARAMETERIZED
         # This step has multiple steps in it shaped as a sub-DAG
-        # This step has to be expanded using "expand_condenced_step(self,CN)"
+        # This step has to be expanded using "expand_condensed_step(self,CN)"
  
         for every sub-node in CN unpack the step(dict) and extract these values:
                     workspace: Directory path for the step's working directory.
@@ -451,7 +451,7 @@ class ExecutionGraph(DAG, PickleInterface):
         """
 
         # sort the CN
-        cn_steps_sorted = self.expand_condenced_step(CN)
+        cn_steps_sorted = self.expand_condensed_step(CN)
 
         # Now create entry point of the CN in the _dependencies
         self._dependencies[CN.name] = set()
@@ -462,61 +462,36 @@ class ExecutionGraph(DAG, PickleInterface):
         for item in cn_steps_sorted:
             value   = CN.values.get(item)
             parent  = CN.adjacency_table.get(item)
-            unpacked_edges = None
             
             # Check if the SOURCE of this CN is special, if so then it
             # means that this steps depends on another step and we have 
-            # condenced edge between them that might be a funnel, hub or
+            # condensed edge between them that might be a funnel, hub or
             # regular that we need to unpack.
 
-            if not isinstance(value, dict) and not None:
-                LOGGER.info('THIS IS VALUE {0}'.format(value))
-                unpacked_edges = value
-                continue
+            data = {
+                        "step":          value['step'],
+                        "state":         State.INITIALIZED,
+                        "params":        value['params'],
+                        "workspace":     value['workspace'],
+                        "restart_limit": value['restart_limit'],
+                    }
+            name = value['step'].real_name
+            record = _StepRecord(**data)
+            self._dependencies[name] = set()
+            super(ExecutionGraph, self).add_node(name, record)
 
-                data = {
-                                "step":          value['step'],
-                                "state":         State.INITIALIZED,
-                                "params":        value['params'],
-                                "workspace":     value['workspace'],
-                                "restart_limit": value['restart_limit'],
-                        }
-                name = value['step'].real_name
-                record = _StepRecord(**data)
-                self._dependencies[name] = set()
-                super(ExecutionGraph, self).add_node(name, record)
-                self.status_subtree.append(name)                   
+            # Iterate on CN.adjacency_table and convert all of the sub_edges
+            # into add_conden in the execution graph.
+            if len(parent) >= 1:
+                for child in parent:
+                    LOGGER.info("Adding edge from CN  {0},{1}".format(parent, child))
+                    self.add_connection(parent, child)
 
-            # If not then every step (CN) is independed from each other, 
-            # and we just need to unpack each one separately and ignore the
-            # source node.
-            else:
+            self.status_subtree.append(name)
 
-                data = {
-                            "step":          value['step'],
-                            "state":         State.INITIALIZED,
-                            "params":        value['params'],
-                            "workspace":     value['workspace'],
-                            "restart_limit": value['restart_limit'],
-                        }
-                name = value['step'].real_name
-                record = _StepRecord(**data)
-                self._dependencies[name] = set()
-                super(ExecutionGraph, self).add_node(name, record)
-
-                # Iterate on CN.adjacency_table and convert all of the sub_edges
-                # into add_connections in the execution graph.
-                if len(parent) >= 1:
-                    for child in parent:
-                        LOGGER.info("Adding edge from CN  {0},{1}".format(parent, child))
-                        self.add_connection(parent, child)
-
-                self.status_subtree.append(name)
-
-            
-            if unpacked_edges:
-                for src, dest in unpacked_edges:
-                    self.add_connection(src, dest)
+        if CN.condensed_edge:
+            for src, dest in CN.condensed_edge:
+                self.add_connection(src, dest)
 
         # we must remove the CN after expand it, 
         # otherwise we will have duplicate records.
@@ -737,7 +712,7 @@ class ExecutionGraph(DAG, PickleInterface):
             elif self._status_order == 'dfs':
                 subtree, _ = self.dfs_subtree("_source", par="_source")
 
-            # We ignore the _source node and the Condenced nodes (becasue we already exapnded them)
+            # We ignore the _source node and the condensed nodes (becasue we already exapnded them)
             self._status_subtree = [key for key in subtree
                                     if key != '_source' and not key.startswith('CN-')]
 
